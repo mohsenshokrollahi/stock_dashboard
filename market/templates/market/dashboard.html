@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mohsen: US Stock Status Dashboard</title>
-  <meta http-equiv="refresh" content="120">
+  <meta http-equiv="refresh" content="300">
   <style>
     :root {
       --bg: #f4f8fc;
@@ -109,7 +109,7 @@
 <body>
   <main class="container">
     <h1>Mohsen: US Stock Status Dashboard</h1>
-    <p class="meta">Auto refresh every 2 minutes. Last update: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
+    <p class="meta">Auto refresh every 5 minutes. Last update: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
 
     {% if error %}
       <div class="error">Could not refresh data: {{ error }}</div>
