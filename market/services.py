@@ -131,16 +131,6 @@ def _build_rows_stooq():
 
 
 def _build_rows():
-    try:
-        rows = _build_rows_yahoo_quote()
-        if rows:
-            return rows
-    except HTTPError as exc:
-        if exc.code != 429:
-            raise
-    except (URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
-        pass
-
     return _build_rows_stooq()
 
 
