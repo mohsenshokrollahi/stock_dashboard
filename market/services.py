@@ -4,12 +4,34 @@ from django.core.cache import cache
 import yfinance as yf
 
 UNIVERSE = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B", "UNH", "XOM",
-    "LLY", "JPM", "V", "JNJ", "PG", "MA", "AVGO", "HD", "CVX", "MRK",
-    "COST", "ABBV", "PEP", "KO", "ADBE", "BAC", "WMT", "MCD", "CSCO", "CRM",
-    "ACN", "TMO", "NFLX", "AMD", "LIN", "DHR", "ABT", "INTC", "NKE", "VZ",
-    "QCOM", "CMCSA", "TXN", "INTU", "PFE", "HON", "ORCL", "PM", "IBM", "COP",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
+    "META", "TSLA", "JPM", "V", "JNJ",
+    "PG", "MA", "HD", "CVX", "MRK",
+    "KO", "BAC", "WMT", "NFLX", "AMD",
 ]
+
+COMPANY_NAMES = {
+    "AAPL": "Apple Inc.",
+    "MSFT": "Microsoft Corp.",
+    "GOOGL": "Alphabet Inc.",
+    "AMZN": "Amazon.com Inc.",
+    "NVDA": "NVIDIA Corp.",
+    "META": "Meta Platforms Inc.",
+    "TSLA": "Tesla Inc.",
+    "JPM": "JPMorgan Chase & Co.",
+    "V": "Visa Inc.",
+    "JNJ": "Johnson & Johnson",
+    "PG": "Procter & Gamble Co.",
+    "MA": "Mastercard Inc.",
+    "HD": "Home Depot Inc.",
+    "CVX": "Chevron Corp.",
+    "MRK": "Merck & Co.",
+    "KO": "Coca-Cola Co.",
+    "BAC": "Bank of America Corp.",
+    "WMT": "Walmart Inc.",
+    "NFLX": "Netflix Inc.",
+    "AMD": "Advanced Micro Devices Inc.",
+}
 
 CACHE_KEY = "market_snapshot"
 CACHE_TIMEOUT_SECONDS = 90
@@ -20,9 +42,15 @@ def _extract_close_series(raw_data, symbol):
         return None
 
     if hasattr(raw_data.columns, "levels") and len(raw_data.columns.levels) > 1:
-        if symbol not in raw_data.columns.levels[0]:
+        close_series = None
+
+        # yfinance may return MultiIndex as (symbol, field) OR (field, symbol).
+        if symbol in raw_data.columns.levels[0] and "Close" in raw_data.columns.levels[1]:
+            close_series = raw_data[(symbol, "Close")].dropna()
+        elif "Close" in raw_data.columns.levels[0] and symbol in raw_data.columns.levels[1]:
+            close_series = raw_data[("Close", symbol)].dropna()
+        else:
             return None
-        close_series = raw_data[(symbol, "Close")].dropna()
     else:
         if "Close" not in raw_data.columns:
             return None
@@ -48,6 +76,18 @@ def _build_rows():
     rows = []
     for symbol in UNIVERSE:
         close_series = _extract_close_series(raw_data, symbol)
+        # Fallback for symbols missing from the bulk response.
+        if close_series is None or len(close_series) < 2:
+            symbol_data = yf.download(
+                tickers=symbol,
+                period="5d",
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+            close_series = _extract_close_series(symbol_data, symbol)
+
         if close_series is None or len(close_series) < 2:
             continue
 
@@ -60,6 +100,7 @@ def _build_rows():
         rows.append(
             {
                 "symbol": symbol,
+                "company_name": COMPANY_NAMES.get(symbol, symbol),
                 "price": round(last_price, 2),
                 "previous_close": round(prev_close, 2),
                 "change_pct": round(change_pct, 2),

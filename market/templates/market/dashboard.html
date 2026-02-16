@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stock Dashboard</title>
+  <title>Mohsen: US Stock Status Dashboard</title>
   <meta http-equiv="refresh" content="120">
   <style>
     :root {
@@ -108,7 +108,7 @@
 </head>
 <body>
   <main class="container">
-    <h1>US Stock Status Dashboard</h1>
+    <h1>Mohsen: US Stock Status Dashboard</h1>
     <p class="meta">Auto refresh every 2 minutes. Last update: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
 
     {% if error %}
@@ -125,7 +125,7 @@
           <tbody>
             {% for stock in top_gainers %}
               <tr>
-                <td>{{ stock.symbol }}</td>
+                <td>{{ stock.symbol }} - {{ stock.company_name }}</td>
                 <td>${{ stock.price }}</td>
                 <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
               </tr>
@@ -145,7 +145,7 @@
           <tbody>
             {% for stock in top_losers %}
               <tr>
-                <td>{{ stock.symbol }}</td>
+                <td>{{ stock.symbol }} - {{ stock.company_name }}</td>
                 <td>${{ stock.price }}</td>
                 <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
               </tr>
@@ -166,7 +166,7 @@
         <tbody>
           {% for stock in stocks %}
             <tr>
-              <td>{{ stock.symbol }}</td>
+              <td>{{ stock.symbol }} - {{ stock.company_name }}</td>
               <td>${{ stock.price }}</td>
               <td>${{ stock.previous_close }}</td>
               <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
