@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Stock Dashboard (Django)
 
 This project shows:
@@ -28,3 +29,6 @@ Open: `http://127.0.0.1:8000`
 - Data source: Yahoo Finance via `yfinance`.
 - "All stock status" means all symbols in the tracked universe in `market/services.py`.
 - The page auto-refreshes every 120 seconds.
+=======
+# stock_dashboard
+>>>>>>> e6dba0c3cc9dab76091219a5f03fa976c67e9609
