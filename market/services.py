@@ -1,7 +1,14 @@
+import csv
 from datetime import datetime, timezone
+import io
+import json
+import socket
+import ssl
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from django.core.cache import cache
-import yfinance as yf
 
 UNIVERSE = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
@@ -34,80 +41,107 @@ COMPANY_NAMES = {
 }
 
 CACHE_KEY = "market_snapshot"
-CACHE_TIMEOUT_SECONDS = 90
+CACHE_TIMEOUT_SECONDS = 600
+STALE_CACHE_KEY = "market_snapshot_stale"
 
 
-def _extract_close_series(raw_data, symbol):
-    if raw_data.empty:
-        return None
-
-    if hasattr(raw_data.columns, "levels") and len(raw_data.columns.levels) > 1:
-        close_series = None
-
-        # yfinance may return MultiIndex as (symbol, field) OR (field, symbol).
-        if symbol in raw_data.columns.levels[0] and "Close" in raw_data.columns.levels[1]:
-            close_series = raw_data[(symbol, "Close")].dropna()
-        elif "Close" in raw_data.columns.levels[0] and symbol in raw_data.columns.levels[1]:
-            close_series = raw_data[("Close", symbol)].dropna()
-        else:
-            return None
-    else:
-        if "Close" not in raw_data.columns:
-            return None
-        close_series = raw_data["Close"].dropna()
-
-    if close_series.empty:
-        return None
-    return close_series
-
-
-def _build_rows():
-    tickers = " ".join(UNIVERSE)
-    raw_data = yf.download(
-        tickers=tickers,
-        period="5d",
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        threads=True,
-        group_by="ticker",
+def _build_rows_yahoo_quote():
+    symbols = ",".join(UNIVERSE)
+    url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}".format(
+        quote(symbols)
     )
-
-    rows = []
-    for symbol in UNIVERSE:
-        close_series = _extract_close_series(raw_data, symbol)
-        # Fallback for symbols missing from the bulk response.
-        if close_series is None or len(close_series) < 2:
-            symbol_data = yf.download(
-                tickers=symbol,
-                period="5d",
-                interval="1d",
-                auto_adjust=False,
-                progress=False,
-                threads=False,
+    req = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 Safari/537.36"
             )
-            close_series = _extract_close_series(symbol_data, symbol)
+        },
+    )
+    with urlopen(req, timeout=6) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
-        if close_series is None or len(close_series) < 2:
+    results = payload.get("quoteResponse", {}).get("result", [])
+    rows = []
+    for item in results:
+        symbol = item.get("symbol")
+        if symbol not in UNIVERSE:
             continue
 
-        prev_close = float(close_series.iloc[-2])
-        last_price = float(close_series.iloc[-1])
-        if prev_close == 0:
+        price = item.get("regularMarketPrice")
+        prev_close = item.get("regularMarketPreviousClose")
+        change_pct = item.get("regularMarketChangePercent")
+        if price is None or prev_close in (None, 0) or change_pct is None:
             continue
 
-        change_pct = ((last_price - prev_close) / prev_close) * 100
         rows.append(
             {
                 "symbol": symbol,
-                "company_name": COMPANY_NAMES.get(symbol, symbol),
-                "price": round(last_price, 2),
-                "previous_close": round(prev_close, 2),
-                "change_pct": round(change_pct, 2),
+                "company_name": COMPANY_NAMES.get(symbol, item.get("shortName", symbol)),
+                "price": round(float(price), 2),
+                "previous_close": round(float(prev_close), 2),
+                "change_pct": round(float(change_pct), 2),
             }
         )
-
     return rows
+
+
+def _fetch_last_two_closes_stooq(symbol):
+    url = "https://stooq.com/q/d/l/?s={}&i=d".format(symbol.lower() + ".us")
+    with urlopen(url, timeout=4) as resp:
+        text = resp.read().decode("utf-8", errors="ignore")
+
+    parsed_rows = list(csv.DictReader(io.StringIO(text)))
+    parsed_rows = [
+        row for row in parsed_rows if row.get("Close") and row["Close"] != "N/D"
+    ]
+    if len(parsed_rows) < 2:
+        return None
+
+    parsed_rows.sort(key=lambda row: row["Date"])
+    prev_close = float(parsed_rows[-2]["Close"])
+    last_price = float(parsed_rows[-1]["Close"])
+    if prev_close == 0:
+        return None
+    return prev_close, last_price
+
+
+def _build_rows_stooq():
+    rows = []
+    for symbol in UNIVERSE:
+        try:
+            values = _fetch_last_two_closes_stooq(symbol)
+            if not values:
+                continue
+            prev_close, last_price = values
+            change_pct = ((last_price - prev_close) / prev_close) * 100
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "company_name": COMPANY_NAMES.get(symbol, symbol),
+                    "price": round(last_price, 2),
+                    "previous_close": round(prev_close, 2),
+                    "change_pct": round(change_pct, 2),
+                }
+            )
+        except (HTTPError, URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
+            continue
+    return rows
+
+
+def _build_rows():
+    try:
+        rows = _build_rows_yahoo_quote()
+        if rows:
+            return rows
+    except HTTPError as exc:
+        if exc.code != 429:
+            raise
+    except (URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
+        pass
+
+    return _build_rows_stooq()
 
 
 def get_market_snapshot():
@@ -115,6 +149,7 @@ def get_market_snapshot():
     if cached:
         return cached
 
+    stale = cache.get(STALE_CACHE_KEY)
     context = {
         "generated_at": datetime.now(timezone.utc),
         "stocks": [],
@@ -129,8 +164,14 @@ def get_market_snapshot():
         context["stocks"] = rows
         context["top_gainers"] = rows[:10]
         context["top_losers"] = sorted(rows, key=lambda x: x["change_pct"])[:10]
+        cache.set(CACHE_KEY, context, CACHE_TIMEOUT_SECONDS)
+        cache.set(STALE_CACHE_KEY, context, 86400)
+        return context
     except Exception as exc:
+        if stale:
+            stale["error"] = (
+                "Live update is temporarily limited. Showing last cached data."
+            )
+            return stale
         context["error"] = str(exc)
-
-    cache.set(CACHE_KEY, context, CACHE_TIMEOUT_SECONDS)
-    return context
+        return context
