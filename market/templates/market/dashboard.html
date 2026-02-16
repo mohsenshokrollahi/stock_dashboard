@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stock Dashboard</title>
+  <meta http-equiv="refresh" content="120">
+  <style>
+    :root {
+      --bg: #f4f8fc;
+      --card: #ffffff;
+      --text: #1d2b3a;
+      --muted: #5c6f82;
+      --green: #138a36;
+      --red: #b42318;
+      --line: #d9e2ec;
+    }
+
+    body {
+      margin: 0;
+      font-family: "DejaVu Sans", "Liberation Sans", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top right, #d8e9ff, var(--bg) 40%);
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin: 8px 0 20px;
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 8px 20px rgba(20, 39, 58, 0.06);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th {
+      font-size: 0.85rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .pos {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .neg {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .error {
+      background: #fff1f0;
+      color: #7a271a;
+      border: 1px solid #f8cfc9;
+      padding: 10px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 640px) {
+      h1 {
+        font-size: 1.4rem;
+      }
+
+      th,
+      td {
+        font-size: 0.82rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>US Stock Status Dashboard</h1>
+    <p class="meta">Auto refresh every 2 minutes. Last update: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
+
+    {% if error %}
+      <div class="error">Could not refresh data: {{ error }}</div>
+    {% endif %}
+
+    <section class="grid">
+      <article class="card">
+        <h2>Top 10 Winners (Today)</h2>
+        <table>
+          <thead>
+            <tr><th>Symbol</th><th>Price</th><th>Change %</th></tr>
+          </thead>
+          <tbody>
+            {% for stock in top_gainers %}
+              <tr>
+                <td>{{ stock.symbol }}</td>
+                <td>${{ stock.price }}</td>
+                <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3">No data</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </article>
+
+      <article class="card">
+        <h2>Top 10 Losers (Today)</h2>
+        <table>
+          <thead>
+            <tr><th>Symbol</th><th>Price</th><th>Change %</th></tr>
+          </thead>
+          <tbody>
+            {% for stock in top_losers %}
+              <tr>
+                <td>{{ stock.symbol }}</td>
+                <td>${{ stock.price }}</td>
+                <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3">No data</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>All Tracked Stock Status</h2>
+      <table>
+        <thead>
+          <tr><th>Symbol</th><th>Price</th><th>Previous Close</th><th>Change %</th></tr>
+        </thead>
+        <tbody>
+          {% for stock in stocks %}
+            <tr>
+              <td>{{ stock.symbol }}</td>
+              <td>${{ stock.price }}</td>
+              <td>${{ stock.previous_close }}</td>
+              <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4">No data available</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
