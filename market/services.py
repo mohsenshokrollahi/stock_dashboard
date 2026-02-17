@@ -5,10 +5,13 @@ import json
 import socket
 import ssl
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from django.core.cache import cache
+from django.db.models import Avg
+from django.utils import timezone as dj_timezone
+
+from .models import DailyLeaderSnapshot
 
 UNIVERSE = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
@@ -43,48 +46,6 @@ COMPANY_NAMES = {
 CACHE_KEY = "market_snapshot"
 CACHE_TIMEOUT_SECONDS = 600
 STALE_CACHE_KEY = "market_snapshot_stale"
-
-
-def _build_rows_yahoo_quote():
-    symbols = ",".join(UNIVERSE)
-    url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}".format(
-        quote(symbols)
-    )
-    req = Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) "
-                "AppleWebKit/537.36 Safari/537.36"
-            )
-        },
-    )
-    with urlopen(req, timeout=6) as resp:
-        payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-
-    results = payload.get("quoteResponse", {}).get("result", [])
-    rows = []
-    for item in results:
-        symbol = item.get("symbol")
-        if symbol not in UNIVERSE:
-            continue
-
-        price = item.get("regularMarketPrice")
-        prev_close = item.get("regularMarketPreviousClose")
-        change_pct = item.get("regularMarketChangePercent")
-        if price is None or prev_close in (None, 0) or change_pct is None:
-            continue
-
-        rows.append(
-            {
-                "symbol": symbol,
-                "company_name": COMPANY_NAMES.get(symbol, item.get("shortName", symbol)),
-                "price": round(float(price), 2),
-                "previous_close": round(float(prev_close), 2),
-                "change_pct": round(float(change_pct), 2),
-            }
-        )
-    return rows
 
 
 def _fetch_last_two_closes_stooq(symbol):
@@ -134,6 +95,99 @@ def _build_rows():
     return _build_rows_stooq()
 
 
+def _status_label(status_key):
+    if status_key == DailyLeaderSnapshot.GROUP_WINNER:
+        return "Winner"
+    if status_key == DailyLeaderSnapshot.GROUP_LOSER:
+        return "Loser"
+    return "No previous record"
+
+
+def _attach_previous_status(top_gainers, top_losers):
+    symbols = [row["symbol"] for row in (top_gainers + top_losers)]
+    if not symbols:
+        return
+
+    today = dj_timezone.localdate()
+    status_map = {}
+    for symbol in symbols:
+        previous = (
+            DailyLeaderSnapshot.objects.filter(symbol=symbol, snapshot_date__lt=today)
+            .order_by("-snapshot_date", "-captured_at")
+            .first()
+        )
+        status_map[symbol] = previous.group if previous else None
+
+    for row in top_gainers + top_losers:
+        status_key = status_map.get(row["symbol"])
+        row["previous_status"] = status_key or "new"
+        row["previous_status_label"] = _status_label(status_key)
+
+
+def _save_daily_snapshots(top_gainers, top_losers):
+    snapshot_date = dj_timezone.localdate()
+
+    for row in top_gainers:
+        DailyLeaderSnapshot.objects.update_or_create(
+            snapshot_date=snapshot_date,
+            symbol=row["symbol"],
+            group=DailyLeaderSnapshot.GROUP_WINNER,
+            defaults={
+                "company_name": row["company_name"],
+                "close_price": row["price"],
+                "change_pct": row["change_pct"],
+            },
+        )
+
+    for row in top_losers:
+        DailyLeaderSnapshot.objects.update_or_create(
+            snapshot_date=snapshot_date,
+            symbol=row["symbol"],
+            group=DailyLeaderSnapshot.GROUP_LOSER,
+            defaults={
+                "company_name": row["company_name"],
+                "close_price": row["price"],
+                "change_pct": row["change_pct"],
+            },
+        )
+
+
+def _build_history_chart_data():
+    all_dates = list(
+        DailyLeaderSnapshot.objects.order_by("snapshot_date")
+        .values_list("snapshot_date", flat=True)
+        .distinct()
+    )
+    dates = all_dates[-10:]
+
+    labels = [str(day) for day in dates]
+    winners_avg = []
+    losers_avg = []
+
+    for day in dates:
+        winner_avg = (
+            DailyLeaderSnapshot.objects.filter(
+                snapshot_date=day,
+                group=DailyLeaderSnapshot.GROUP_WINNER,
+            ).aggregate(avg=Avg("change_pct"))["avg"]
+        )
+        loser_avg = (
+            DailyLeaderSnapshot.objects.filter(
+                snapshot_date=day,
+                group=DailyLeaderSnapshot.GROUP_LOSER,
+            ).aggregate(avg=Avg("change_pct"))["avg"]
+        )
+
+        winners_avg.append(round(float(winner_avg), 2) if winner_avg is not None else None)
+        losers_avg.append(round(float(loser_avg), 2) if loser_avg is not None else None)
+
+    return {
+        "labels": labels,
+        "winner_avg_change": winners_avg,
+        "loser_avg_change": losers_avg,
+    }
+
+
 def get_market_snapshot():
     cached = cache.get(CACHE_KEY)
     if cached:
@@ -145,15 +199,26 @@ def get_market_snapshot():
         "stocks": [],
         "top_gainers": [],
         "top_losers": [],
+        "history_chart_json": json.dumps(
+            {"labels": [], "winner_avg_change": [], "loser_avg_change": []}
+        ),
         "error": "",
     }
 
     try:
         rows = _build_rows()
         rows.sort(key=lambda x: x["change_pct"], reverse=True)
+        top_gainers = rows[:10]
+        top_losers = sorted(rows, key=lambda x: x["change_pct"])[:10]
+
+        _attach_previous_status(top_gainers, top_losers)
+        _save_daily_snapshots(top_gainers, top_losers)
+
         context["stocks"] = rows
-        context["top_gainers"] = rows[:10]
-        context["top_losers"] = sorted(rows, key=lambda x: x["change_pct"])[:10]
+        context["top_gainers"] = top_gainers
+        context["top_losers"] = top_losers
+        context["history_chart_json"] = json.dumps(_build_history_chart_data())
+
         cache.set(CACHE_KEY, context, CACHE_TIMEOUT_SECONDS)
         cache.set(STALE_CACHE_KEY, context, 86400)
         return context

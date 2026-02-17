@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mohsen: US Stock Status Dashboard</title>
-  <meta http-equiv="refresh" content="300">
   <style>
     :root {
       --bg: #f4f8fc;
@@ -94,6 +93,35 @@
       margin-bottom: 12px;
     }
 
+    .status {
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .status-winner {
+      color: var(--green);
+    }
+
+    .status-loser {
+      color: var(--red);
+    }
+
+    .status-new {
+      color: var(--muted);
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 280px;
+      width: 100%;
+    }
+
+    #historyChart {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
     @media (max-width: 640px) {
       h1 {
         font-size: 1.4rem;
@@ -109,7 +137,7 @@
 <body>
   <main class="container">
     <h1>Mohsen: US Stock Status Dashboard</h1>
-    <p class="meta">Auto refresh every 5 minutes. Last update: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
+    <p class="meta">Last refresh: {{ generated_at|date:"Y-m-d H:i:s" }} UTC</p>
 
     {% if error %}
       <div class="error">Could not refresh data: {{ error }}</div>
@@ -120,7 +148,7 @@
         <h2>Top 10 Winners (Today)</h2>
         <table>
           <thead>
-            <tr><th>Symbol</th><th>Price</th><th>Change %</th></tr>
+            <tr><th>Symbol</th><th>Price</th><th>Change %</th><th>Last Status</th></tr>
           </thead>
           <tbody>
             {% for stock in top_gainers %}
@@ -128,9 +156,12 @@
                 <td>{{ stock.symbol }} - {{ stock.company_name }}</td>
                 <td>${{ stock.price }}</td>
                 <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
+                <td class="status {% if stock.previous_status == 'winner' %}status-winner{% elif stock.previous_status == 'loser' %}status-loser{% else %}status-new{% endif %}">
+                  {{ stock.previous_status_label }}
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="3">No data</td></tr>
+              <tr><td colspan="4">No data</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -140,7 +171,7 @@
         <h2>Top 10 Losers (Today)</h2>
         <table>
           <thead>
-            <tr><th>Symbol</th><th>Price</th><th>Change %</th></tr>
+            <tr><th>Symbol</th><th>Price</th><th>Change %</th><th>Last Status</th></tr>
           </thead>
           <tbody>
             {% for stock in top_losers %}
@@ -148,13 +179,24 @@
                 <td>{{ stock.symbol }} - {{ stock.company_name }}</td>
                 <td>${{ stock.price }}</td>
                 <td class="{% if stock.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ stock.change_pct }}%</td>
+                <td class="status {% if stock.previous_status == 'winner' %}status-winner{% elif stock.previous_status == 'loser' %}status-loser{% else %}status-new{% endif %}">
+                  {{ stock.previous_status_label }}
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="3">No data</td></tr>
+              <tr><td colspan="4">No data</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </article>
+    </section>
+
+    <section class="card">
+      <h2>10-Day Winners vs Losers Trend</h2>
+      <p class="meta">Average daily change for top winners and top losers.</p>
+      <div class="chart-wrap">
+        <canvas id="historyChart"></canvas>
+      </div>
     </section>
 
     <section class="card">
@@ -178,5 +220,96 @@
       </table>
     </section>
   </main>
+  <script>
+    (function() {
+      const chartData = {{ history_chart_json|safe }};
+      const canvas = document.getElementById("historyChart");
+      if (!canvas || !chartData || !chartData.labels || chartData.labels.length === 0) {
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      const parent = canvas.parentElement;
+      const width = Math.max(320, parent.clientWidth);
+      const height = Math.max(240, parent.clientHeight);
+      canvas.width = width;
+      canvas.height = height;
+
+      const padding = { top: 18, right: 18, bottom: 36, left: 46 };
+      const plotW = width - padding.left - padding.right;
+      const plotH = height - padding.top - padding.bottom;
+
+      const winner = chartData.winner_avg_change || [];
+      const loser = chartData.loser_avg_change || [];
+      const values = winner.concat(loser).filter(v => v !== null && v !== undefined);
+      const minY = Math.min.apply(null, values);
+      const maxY = Math.max.apply(null, values);
+      const range = (maxY - minY) || 1;
+
+      function x(i) {
+        if (chartData.labels.length === 1) return padding.left + (plotW / 2);
+        return padding.left + (i * (plotW / (chartData.labels.length - 1)));
+      }
+
+      function y(v) {
+        return padding.top + ((maxY - v) / range) * plotH;
+      }
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = "#d9e2ec";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      ctx.fillStyle = "#5c6f82";
+      ctx.font = "12px DejaVu Sans";
+      ctx.textAlign = "center";
+      chartData.labels.forEach((label, i) => {
+        const lx = x(i);
+        ctx.fillText(label.slice(5), lx, height - 12);
+      });
+
+      function drawSeries(series, color) {
+        const points = series.map((v, i) => (v === null || v === undefined) ? null : [x(i), y(v)]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        points.forEach((p) => {
+          if (!p) return;
+          if (!started) {
+            ctx.moveTo(p[0], p[1]);
+            started = true;
+          } else {
+            ctx.lineTo(p[0], p[1]);
+          }
+        });
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        points.forEach((p) => {
+          if (!p) return;
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      drawSeries(winner, "#138a36");
+      drawSeries(loser, "#b42318");
+
+      ctx.fillStyle = "#138a36";
+      ctx.fillRect(width - 170, 16, 10, 10);
+      ctx.fillStyle = "#1d2b3a";
+      ctx.fillText("Winners Avg %", width - 110, 25);
+      ctx.fillStyle = "#b42318";
+      ctx.fillRect(width - 170, 34, 10, 10);
+      ctx.fillStyle = "#1d2b3a";
+      ctx.fillText("Losers Avg %", width - 106, 43);
+    })();
+  </script>
 </body>
 </html>
