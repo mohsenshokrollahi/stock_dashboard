@@ -135,9 +135,74 @@ def _build_rows_yahoo_quote():
     return rows
 
 
+def _fetch_last_two_closes_yahoo_chart(symbol):
+    url = "https://query2.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=10d".format(
+        symbol
+    )
+    req = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 Safari/537.36"
+            )
+        },
+    )
+    with urlopen(req, timeout=6) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+    results = payload.get("chart", {}).get("result")
+    if not results:
+        return None
+
+    quote = results[0].get("indicators", {}).get("quote", [])
+    if not quote or "close" not in quote[0]:
+        return None
+
+    closes = [value for value in quote[0]["close"] if value is not None]
+    if len(closes) < 2:
+        return None
+
+    prev_close = float(closes[-2])
+    last_price = float(closes[-1])
+    if prev_close == 0:
+        return None
+    return prev_close, last_price
+
+
+def _build_rows_yahoo_chart():
+    rows = []
+    for symbol in UNIVERSE:
+        try:
+            values = _fetch_last_two_closes_yahoo_chart(symbol)
+            if not values:
+                continue
+            prev_close, last_price = values
+            change_pct = ((last_price - prev_close) / prev_close) * 100
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "company_name": COMPANY_NAMES.get(symbol, symbol),
+                    "price": round(last_price, 2),
+                    "previous_close": round(prev_close, 2),
+                    "change_pct": round(change_pct, 2),
+                }
+            )
+        except (HTTPError, URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
+            continue
+    return rows
+
+
 def _build_rows():
     try:
         rows = _build_rows_yahoo_quote()
+        if rows:
+            return rows
+    except (HTTPError, URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
+        pass
+
+    try:
+        rows = _build_rows_yahoo_chart()
         if rows:
             return rows
     except (HTTPError, URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
