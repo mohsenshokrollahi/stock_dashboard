@@ -12,6 +12,10 @@
       --muted: #5c6f82;
       --green: #138a36;
       --red: #b42318;
+      --green-soft: #e9f8ee;
+      --red-soft: #fff0ef;
+      --blue-soft: #e9f2ff;
+      --amber-soft: #fff8e6;
       --line: #d9e2ec;
     }
 
@@ -54,6 +58,21 @@
       box-shadow: 0 8px 20px rgba(20, 39, 58, 0.06);
     }
 
+    .card-winner {
+      border-top: 4px solid var(--green);
+      background: linear-gradient(180deg, var(--green-soft), #ffffff 42%);
+    }
+
+    .card-loser {
+      border-top: 4px solid var(--red);
+      background: linear-gradient(180deg, var(--red-soft), #ffffff 42%);
+    }
+
+    .card-history {
+      border-top: 4px solid #2f6fed;
+      background: linear-gradient(180deg, var(--blue-soft), #ffffff 45%);
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -72,6 +91,15 @@
       color: var(--muted);
       letter-spacing: 0.02em;
       text-transform: uppercase;
+      background: var(--blue-soft);
+    }
+
+    tbody tr:nth-child(odd) {
+      background: #fbfdff;
+    }
+
+    tbody tr:hover {
+      background: var(--amber-soft);
     }
 
     .pos {
@@ -99,15 +127,30 @@
     }
 
     .status-winner {
-      color: var(--green);
+      color: #0f6f2d;
+      background: var(--green-soft);
+      border: 1px solid #b7e6c2;
+      border-radius: 999px;
+      padding: 3px 8px;
+      display: inline-block;
     }
 
     .status-loser {
-      color: var(--red);
+      color: #9c2015;
+      background: var(--red-soft);
+      border: 1px solid #f0b7b1;
+      border-radius: 999px;
+      padding: 3px 8px;
+      display: inline-block;
     }
 
     .status-new {
       color: var(--muted);
+      background: #f2f6fa;
+      border: 1px solid #d5e0ea;
+      border-radius: 999px;
+      padding: 3px 8px;
+      display: inline-block;
     }
 
     .chart-wrap {
@@ -144,7 +187,7 @@
     {% endif %}
 
     <section class="grid">
-      <article class="card">
+      <article class="card card-winner">
         <h2>Top 10 Winners (Today)</h2>
         <table>
           <thead>
@@ -167,7 +210,7 @@
         </table>
       </article>
 
-      <article class="card">
+      <article class="card card-loser">
         <h2>Top 10 Losers (Today)</h2>
         <table>
           <thead>
@@ -191,7 +234,7 @@
       </article>
     </section>
 
-    <section class="card">
+    <section class="card card-history">
       <h2>10-Day Winners vs Losers Trend</h2>
       <p class="meta">Average daily change for top winners and top losers.</p>
       <div class="chart-wrap">

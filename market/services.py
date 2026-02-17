@@ -5,6 +5,8 @@ import json
 import socket
 import ssl
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request
 from urllib.request import urlopen
 
 from django.core.cache import cache
@@ -91,7 +93,56 @@ def _build_rows_stooq():
     return rows
 
 
+def _build_rows_yahoo_quote():
+    symbols = ",".join(UNIVERSE)
+    url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}".format(
+        quote(symbols)
+    )
+    req = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 Safari/537.36"
+            )
+        },
+    )
+    with urlopen(req, timeout=6) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+    results = payload.get("quoteResponse", {}).get("result", [])
+    rows = []
+    for item in results:
+        symbol = item.get("symbol")
+        if symbol not in UNIVERSE:
+            continue
+
+        price = item.get("regularMarketPrice")
+        prev_close = item.get("regularMarketPreviousClose")
+        change_pct = item.get("regularMarketChangePercent")
+        if price is None or prev_close in (None, 0) or change_pct is None:
+            continue
+
+        rows.append(
+            {
+                "symbol": symbol,
+                "company_name": COMPANY_NAMES.get(symbol, item.get("shortName", symbol)),
+                "price": round(float(price), 2),
+                "previous_close": round(float(prev_close), 2),
+                "change_pct": round(float(change_pct), 2),
+            }
+        )
+    return rows
+
+
 def _build_rows():
+    try:
+        rows = _build_rows_yahoo_quote()
+        if rows:
+            return rows
+    except (HTTPError, URLError, ssl.SSLError, socket.timeout, TimeoutError, ValueError):
+        pass
+
     return _build_rows_stooq()
 
 
