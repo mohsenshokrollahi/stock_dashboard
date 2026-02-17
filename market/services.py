@@ -49,7 +49,7 @@ STALE_CACHE_KEY = "market_snapshot_stale"
 
 
 def _fetch_last_two_closes_stooq(symbol):
-    url = "https://stooq.com/q/d/l/?s={}&i=d".format(symbol.lower() + ".us")
+    url = "http://stooq.com/q/d/l/?s={}&i=d".format(symbol.lower() + ".us")
     with urlopen(url, timeout=4) as resp:
         text = resp.read().decode("utf-8", errors="ignore")
 
@@ -207,6 +207,12 @@ def get_market_snapshot():
 
     try:
         rows = _build_rows()
+        if not rows and stale:
+            stale["error"] = "Live fetch returned no rows. Showing last cached data."
+            return stale
+        if not rows:
+            context["error"] = "No market data returned from source."
+            return context
         rows.sort(key=lambda x: x["change_pct"], reverse=True)
         top_gainers = rows[:10]
         top_losers = sorted(rows, key=lambda x: x["change_pct"])[:10]
